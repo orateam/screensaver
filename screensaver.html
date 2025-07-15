@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Photos Screensaver</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            overscroll-behavior: none; /* Prevents pull-to-refresh on mobile */
+        }
+        #screensaver-view {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.5s ease-in-out, visibility 0s linear 0.5s;
+        }
+        #screensaver-view.active {
+            opacity: 1;
+            visibility: visible;
+            transition: opacity 0.5s ease-in-out, visibility 0s linear 0s;
+        }
+        #screensaver-image {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            opacity: 0;
+            transition: opacity 1s ease-in-out;
+        }
+        #screensaver-image.visible {
+            opacity: 1;
+        }
+        .spinner {
+            border: 4px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 4px solid #fff;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Tailwind Custom Font */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    </style>
+</head>
+<body class="bg-gradient-to-br from-slate-900 to-slate-800 text-slate-100 min-h-screen flex flex-col items-center justify-center p-4 selection:bg-sky-500 selection:text-white">
+
+    <div id="main-content" class="w-full max-w-xl text-center space-y-8 p-8 bg-slate-800 bg-opacity-50 rounded-xl shadow-2xl backdrop-blur-md">
+        <header>
+            <h1 class="text-4xl font-bold text-sky-400 mb-2">Google Photos Screensaver</h1>
+            <p class="text-slate-300">View your cherished memories in a beautiful slideshow.</p>
+        </header>
+
+        <div id="auth-status" class="p-4 rounded-lg text-slate-200 min-h-[60px] text-sm break-words">
+            <!-- Status messages will appear here -->
+        </div>
+
+        <div id="controls" class="space-y-4">
+            <button id="authorize_button" onclick="handleAuthClick()" class="w-full bg-sky-500 hover:bg-sky-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75">
+                Authorize with Google Photos
+            </button>
+            <button id="signout_button" onclick="handleSignoutClick()" class="w-full bg-rose-500 hover:bg-rose-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-opacity-75" style="display: none;">
+                Sign Out
+            </button>
+            <button id="start_screensaver_button" onclick="startScreensaver()" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-opacity-75" style="display: none;" disabled>
+                Start Screensaver
+            </button>
+        </div>
+        
+        <div id="settings" class="mt-6 text-left space-y-3" style="display: none;">
+            <h2 class="text-xl font-semibold text-sky-400 mb-2">Settings</h2>
+            <div>
+                <label for="delay_input" class="block text-sm font-medium text-slate-300 mb-1">Image display time (seconds):</label>
+                <input type="number" id="delay_input" value="7" min="1" class="w-full bg-slate-700 text-slate-100 border border-slate-600 rounded-md p-2 focus:ring-sky-500 focus:border-sky-500 placeholder-slate-400">
+            </div>
+            <div>
+                <label for="max_photos_input" class="block text-sm font-medium text-slate-300 mb-1">Max photos to fetch (1-100):</label>
+                <input type="number" id="max_photos_input" value="50" min="1" max="100" class="w-full bg-slate-700 text-slate-100 border border-slate-600 rounded-md p-2 focus:ring-sky-500 focus:border-sky-500 placeholder-slate-400">
+            </div>
+             <div class="pt-2">
+                <input type="checkbox" id="random_order_checkbox" checked class="rounded text-sky-500 focus:ring-sky-400">
+                <label for="random_order_checkbox" class="ml-2 text-sm text-slate-300">Display photos in random order</label>
+            </div>
+        </div>
+
+        <div id="loading-indicator" class="flex justify-center items-center my-4" style="display: none;">
+            <div class="spinner"></div>
+            <p class="ml-3 text-slate-300">Loading photos...</p>
+        </div>
+        
+        <footer class="mt-8 border-t border-slate-700 pt-6">
+            <p class="text-xs text-slate-400">
+                IMPORTANT: This application requires you to configure your own Google API Key and OAuth 2.0 Client ID in the script.
+                It will request read-only access to your Google Photos library.
+            </p>
+        </footer>
+    </div>
+
+    <div id="screensaver-view">
+        <img id="screensaver-image" alt="Screensaver Image">
+    </div>
+
+    <script>
+        // ---------------------------------------------------------------------------------
+        // CRITICAL USER CONFIGURATION:
+        // 1. Go to Google Cloud Console (https://console.cloud.google.com/)
+        // 2. Create a project or use an existing one.
+        // 3. ENABLE THE "Google Photos Library API": 
+        //    - In the Google Cloud Console, go to "APIs & Services" > "Library".
+        //    - Search for "Google Photos Library API" and click "Enable". If it's already enabled, great!
+        // 4. Create Credentials: (APIs & Services > Credentials)
+        //    a. API Key: Create an API key if you don't have one suitable.
+        //       - IMPORTANT: Restrict this key! 
+        //         - Click on the API key name to edit it.
+        //         - Under "API restrictions", select "Restrict key".
+        //         - In the "Select APIs" dropdown, choose "Google Photos Library API". Click OK.
+        //         - Under "Application restrictions" (optional but recommended for production), 
+        //           for testing, you might start with "None" or use "HTTP referrers" 
+        //           (e.g., add `http://localhost:8000/*` if testing locally).
+        //    b. OAuth 2.0 Client ID: Create one for "Web application".
+        //       - Add your "Authorized JavaScript origins" (e.g., `http://localhost:8000` if testing locally on port 8000).
+        //       - Add your "Authorized redirect URIs" (e.g., `http://localhost:8000` - often same as origin for simple SPAs using GIS token client).
+        //       - Configure the "OAuth consent screen" if you haven't already (User Type, App name, User support email, Scopes, Authorized domains etc.).
+        // 5. Replace THE_API_KEY_YOU_CREATED and THE_CLIENT_ID_YOU_CREATED below with your actual credentials from YOUR project.
+        // ---------------------------------------------------------------------------------
+        const API_KEY = 'AIzaSyAfT_H2uZeHUptBHCcY-HAi2VMOR4bwZng'; // <<< REPLACE THIS WITH YOUR ACTUAL API KEY
+        const CLIENT_ID = '450921714427-p06841jd5ba846qoparnqdeq9q6tcjg4.apps.googleusercontent.com'; // <<< REPLACE THIS WITH YOUR ACTUAL CLIENT ID
+
+        const DISCOVERY_DOC = 'https://photoslibrary.googleapis.com/$discovery/rest?version=v1';
+        const SCOPES = 'https://www.googleapis.com/auth/photoslibrary.readonly';
+
+        let tokenClient;
+        let gapiInited = false;
+        let gisInited = false;
+        let googleApiLoaded = false;
+        let mediaItems = [];
+        let currentImageIndex = 0;
+        let screensaverInterval;
+        let screensaverActive = false;
+
+        const authStatusDiv = document.getElementById('auth-status');
+        const authorizeButton = document.getElementById('authorize_button');
+        const signoutButton = document.getElementById('signout_button');
+        const startScreensaverButton = document.getElementById('start_screensaver_button');
+        const settingsDiv = document.getElementById('settings');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const screensaverView = document.getElementById('screensaver-view');
+        const screensaverImage = document.getElementById('screensaver-image');
+        const delayInput = document.getElementById('delay_input');
+        const maxPhotosInput = document.getElementById('max_photos_input');
+        const randomOrderCheckbox = document.getElementById('random_order_checkbox');
+
+
+        function gapiLoaded() {
+            gapi.load('client', initializeGapiClient);
+        }
+
+        async function initializeGapiClient() {
+            if (API_KEY === 'THE_API_KEY_YOU_CREATED') {
+                const message = "CRITICAL CONFIGURATION ERROR: API_KEY is not set. Please edit the HTML file, find the 'API_KEY' constant, and replace 'THE_API_KEY_YOU_CREATED' with your actual Google Cloud API Key. Refer to the comments in the script for setup instructions.";
+                updateAuthStatus(message);
+                alert(message); 
+                console.error(message);
+                authorizeButton.disabled = true;
+                return; 
+            }
+            if (CLIENT_ID === 'THE_CLIENT_ID_YOU_CREATED') {
+                 const message = "CRITICAL CONFIGURATION ERROR: CLIENT_ID is not set. Please edit the HTML file, find the 'CLIENT_ID' constant, and replace 'THE_CLIENT_ID_YOU_CREATED' with your actual Google Cloud OAuth 2.0 Client ID. Refer to the comments in the script for setup instructions.";
+                updateAuthStatus(message);
+                alert(message); 
+                console.error(message);
+                authorizeButton.disabled = true;
+            }
+
+            try {
+                await gapi.client.init({
+                    apiKey: API_KEY,
+                    discoveryDocs: [DISCOVERY_DOC],
+                });
+                gapiInited = true;
+                googleApiLoaded = true;
+                maybeEnableButtons();
+                if (CLIENT_ID !== 'THE_CLIENT_ID_YOU_CREATED') { 
+                   updateAuthStatus("Google API Client loaded. Ready to authorize.");
+                }
+            } catch (err) {
+                console.error('Error initializing GAPI client:', err);
+                let detailedMessage = `Error initializing Google API Client. `;
+                if (err.result && err.result.error) {
+                    detailedMessage += `Details: ${err.result.error.message} (Status: ${err.result.error.status}). `;
+                    if (err.result.error.details && err.result.error.details[0] && err.result.error.details[0].reason === 'API_KEY_SERVICE_BLOCKED') {
+                        detailedMessage += `This indicates your API Key is blocked for the Google Photos Library API. Common Fixes: 1) Ensure "Google Photos Library API" is ENABLED in your Google Cloud project. 2) Check your API Key's "API restrictions" and make sure "Google Photos Library API" is in the allowed list. `;
+                    }
+                } else {
+                    detailedMessage += `Details: ${err.message}. `;
+                }
+                detailedMessage += `Please check the browser console for full error details. Ensure API Key is valid, correctly entered, and the Google Photos Library API is enabled in your project. Also verify API key restrictions in Google Cloud Console.`;
+                updateAuthStatus(detailedMessage);
+            }
+        }
+
+        function gisLoaded() {
+            if (CLIENT_ID === 'THE_CLIENT_ID_YOU_CREATED') {
+                gisInited = true; 
+                maybeEnableButtons();
+                return;
+            }
+            try {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: CLIENT_ID,
+                    scope: SCOPES,
+                    callback: '', 
+                });
+                gisInited = true;
+                maybeEnableButtons();
+            } catch (err) {
+                 console.error('Error initializing Google Sign-In client (GIS):', err);
+                 updateAuthStatus(`Error initializing Google Sign-In. Check console. Ensure Client ID is correct and OAuth consent screen is configured.`);
+            }
+        }
+        
+        function handleAuthClick() {
+            if (API_KEY === 'THE_API_KEY_YOU_CREATED' || CLIENT_ID === 'THE_CLIENT_ID_YOU_CREATED') {
+                const message = "Developer Configuration Needed: Please replace placeholder API_KEY and/or CLIENT_ID values in the HTML file's script section with your own credentials from Google Cloud Console. See comments in the script for details.";
+                updateAuthStatus(message);
+                alert(message);
+                return;
+            }
+
+            if (!googleApiLoaded) {
+                updateAuthStatus("Google API not loaded yet. Please wait or check console.");
+                return;
+            }
+            if (!gisInited || !tokenClient) { 
+                updateAuthStatus("Google Sign-In (GIS) not properly initialized. Please wait or check console. Ensure Client ID is correct and properly configured.");
+                return;
+            }
+
+            tokenClient.callback = async (resp) => {
+                if (resp.error !== undefined) {
+                    console.error('Google token response error:', resp);
+                    updateAuthStatus(`Authorization error: ${resp.error}. Check console, OAuth Client ID configuration (Authorized Origins/Redirect URIs), and ensure you grant permission in the popup.`);
+                    return; 
+                }
+                gapi.client.setToken(resp); 
+                signoutButton.style.display = 'block';
+                authorizeButton.innerText = 'Authorized';
+                authorizeButton.disabled = true;
+                settingsDiv.style.display = 'block';
+                updateAuthStatus("Authorization successful. Fetching photos...");
+                await fetchPhotos();
+            };
+
+            if (gapi.client.getToken() === null) {
+                tokenClient.requestAccessToken({prompt: 'consent'});
+            } else {
+                tokenClient.requestAccessToken({prompt: ''});
+            }
+        }
+
+        function handleSignoutClick() {
+            const currentToken = gapi.client.getToken();
+            if (currentToken && currentToken.access_token) {
+                google.accounts.oauth2.revoke(currentToken.access_token, () => {
+                    gapi.client.setToken(''); 
+                    mediaItems = [];
+                    authorizeButton.innerText = 'Authorize with Google Photos';
+                    authorizeButton.disabled = false;
+                    signoutButton.style.display = 'none';
+                    startScreensaverButton.style.display = 'none';
+                    startScreensaverButton.disabled = true;
+                    settingsDiv.style.display = 'none';
+                    updateAuthStatus("Signed out.");
+                });
+            } else {
+                 updateAuthStatus("Already signed out or no valid token.");
+            }
+        }
+
+        async function fetchPhotos() {
+            if (!gapiInited || gapi.client.getToken() === null) {
+                updateAuthStatus("Not authorized. Please authorize first.");
+                return;
+            }
+            loadingIndicator.style.display = 'flex';
+            startScreensaverButton.disabled = true;
+            try {
+                const maxPhotos = parseInt(maxPhotosInput.value) || 50;
+                const response = await gapi.client.photoslibrary.mediaItems.search({
+                    pageSize: Math.min(maxPhotos, 100), 
+                });
+                
+                mediaItems = response.result.mediaItems ? response.result.mediaItems.filter(item => item.mimeType && item.mimeType.startsWith('image/')) : [];
+                
+                if (mediaItems.length > 0) {
+                    if (randomOrderCheckbox.checked) {
+                        shuffleArray(mediaItems);
+                    }
+                    startScreensaverButton.style.display = 'block';
+                    startScreensaverButton.disabled = false;
+                    updateAuthStatus(`${mediaItems.length} photos loaded and ready for screensaver.`);
+                } else {
+                    updateAuthStatus("No photos found in your library, or an issue occurred fetching them. Ensure your library has photos or check API permissions and console for errors.");
+                }
+            } catch (err) {
+                console.error('Error fetching photos:', err);
+                updateAuthStatus(`Error fetching photos: ${err.result?.error?.message || err.message}. Check console.`);
+                 if (err.result && err.result.error && err.result.error.status === 'UNAUTHENTICATED') {
+                    updateAuthStatus("Authentication error while fetching photos. Your session might have expired. Please try signing out and authorizing again.");
+                    // Consider calling handleSignoutClick() here if appropriate, but be careful of loops
+                }
+            } finally {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function startScreensaver() {
+            if (mediaItems.length === 0) {
+                updateAuthStatus("No photos to display. Please authorize and fetch photos.");
+                return;
+            }
+            screensaverActive = true;
+            screensaverView.classList.add('active');
+            document.body.style.overflow = 'hidden';
+            currentImageIndex = -1; 
+            nextImage(); 
+            
+            const delay = (parseInt(delayInput.value) || 7) * 1000;
+            if(screensaverInterval) clearInterval(screensaverInterval);
+            screensaverInterval = setInterval(nextImage, delay);
+
+            document.addEventListener('keydown', exitScreensaverOnKey);
+            document.addEventListener('mousemove', exitScreensaverOnMouse);
+            document.addEventListener('click', exitScreensaverOnClick);
+        }
+
+        function nextImage() {
+            if (!screensaverActive || mediaItems.length === 0) return;
+
+            screensaverImage.classList.remove('visible'); 
+
+            setTimeout(() => {
+                if (!screensaverActive) return; 
+                currentImageIndex = (currentImageIndex + 1) % mediaItems.length;
+                const item = mediaItems[currentImageIndex];
+                if (!item || !item.baseUrl) {
+                    console.warn("Invalid media item or baseUrl missing, skipping:", item);
+                    setTimeout(nextImage, 100); 
+                    return;
+                }
+                screensaverImage.src = item.baseUrl + '=d'; 
+                screensaverImage.onload = () => {
+                    if (screensaverActive) screensaverImage.classList.add('visible'); 
+                };
+                screensaverImage.onerror = () => {
+                    console.warn("Error loading image, skipping:", item.baseUrl);
+                    setTimeout(nextImage, 100); 
+                };
+            }, 1000); 
+        }
+        
+        function exitScreensaverLogic() {
+            if (!screensaverActive) return;
+            screensaverActive = false;
+            clearInterval(screensaverInterval);
+            screensaverView.classList.remove('active');
+            screensaverImage.classList.remove('visible');
+            screensaverImage.src = ''; 
+            document.body.style.overflow = 'auto'; 
+
+            document.removeEventListener('keydown', exitScreensaverOnKey);
+            document.removeEventListener('mousemove', exitScreensaverOnMouse);
+            document.removeEventListener('click', exitScreensaverOnClick);
+            updateAuthStatus("Screensaver ended.");
+        }
+
+        function exitScreensaverOnKey(e) {
+            if (e.key === "Escape") {
+                exitScreensaverLogic();
+            }
+        }
+        function exitScreensaverOnMouse() {
+            exitScreensaverLogic();
+        }
+        function exitScreensaverOnClick() {
+             exitScreensaverLogic();
+        }
+
+
+        function updateAuthStatus(message) {
+            authStatusDiv.textContent = message;
+        }
+
+        function maybeEnableButtons() {
+             if (API_KEY !== 'THE_API_KEY_YOU_CREATED' && CLIENT_ID !== 'THE_CLIENT_ID_YOU_CREATED' && googleApiLoaded && gisInited) {
+                authorizeButton.disabled = false;
+             } else {
+                authorizeButton.disabled = true;
+             }
+        }
+        
+        window.gapiLoaded = gapiLoaded;
+        window.gisLoaded = gisLoaded;
+
+        if (API_KEY === 'THE_API_KEY_YOU_CREATED' || CLIENT_ID === 'THE_CLIENT_ID_YOU_CREATED') {
+            updateAuthStatus("CRITICAL: API_KEY and/or CLIENT_ID are not configured. Please edit the HTML script. See comments for setup instructions.");
+            authorizeButton.disabled = true;
+        } else {
+            updateAuthStatus("Loading Google services... Please ensure API Key and Client ID are correctly configured in the script.");
+        }
+
+    </script>
+    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
+    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
+
+</body>
+</html>
