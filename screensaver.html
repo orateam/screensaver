@@ -5,8 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Google Photos Screensaver</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <script src="https://apis.google.com/js/api.js" async defer></script>
     <style>
         body {
             font-family: 'Inter', sans-serif;
@@ -67,8 +65,7 @@
         </header>
 
         <div id="auth-status" class="p-4 rounded-lg text-slate-200 min-h-[60px] text-sm break-words">
-            <!-- Status messages will appear here -->
-        </div>
+            </div>
 
         <div id="controls" class="space-y-4">
             <button id="authorize_button" onclick="handleAuthClick()" class="w-full bg-sky-500 hover:bg-sky-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-sky-400 focus:ring-opacity-75">
@@ -419,21 +416,3 @@
              } else {
                 authorizeButton.disabled = true;
              }
-        }
-        
-        window.gapiLoaded = gapiLoaded;
-        window.gisLoaded = gisLoaded;
-
-        if (API_KEY === 'THE_API_KEY_YOU_CREATED' || CLIENT_ID === 'THE_CLIENT_ID_YOU_CREATED') {
-            updateAuthStatus("CRITICAL: API_KEY and/or CLIENT_ID are not configured. Please edit the HTML script. See comments for setup instructions.");
-            authorizeButton.disabled = true;
-        } else {
-            updateAuthStatus("Loading Google services... Please ensure API Key and Client ID are correctly configured in the script.");
-        }
-
-    </script>
-    <script async defer src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-    <script async defer src="https://accounts.google.com/gsi/client" onload="gisLoaded()"></script>
-
-</body>
-</html>
